@@ -1,0 +1,1 @@
+console.log("%cHello World", "color: red; font-size: 2em; border: 1px solid dodgerblue;");

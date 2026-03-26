@@ -1,0 +1,2934 @@
+====================================================================================================
+🚀 UNILOGGER SOURCE CODE DUMP
+====================================================================================================
+📅 Generated: 26/3/2026, 5:55:33 pm
+📁 Root: src/
+📊 Total Files: 25
+====================================================================================================
+
+📑 TABLE OF CONTENTS
+--------------------------------------------------
+1. 📄 src\core\LogEntry.ts
+2. 📄 src\core\Logger.ts
+3. 📄 src\core\LoggerBuilder.ts
+4. 📄 src\core\formatters\FormatterFactory.ts
+5. 📄 src\core\formatters\JsonFormatter.ts
+6. 📄 src\core\formatters\LogfmtFormatter.ts
+7. 📄 src\core\formatters\PrettyFormatter.ts
+8. 📄 src\core\formatters\index.ts
+9. 📄 src\core\index.ts
+10. 📄 src\core\interfaces\IFormatter.ts
+11. 📄 src\core\interfaces\ILogger.ts
+12. 📄 src\core\interfaces\ITransport.ts
+13. 📄 src\core\interfaces\index.ts
+14. 📄 src\core\transports\FileTransport.ts
+15. 📄 src\core\transports\JsonFileTransport.ts
+16. 📄 src\core\transports\TerminalTransport.ts
+17. 📄 src\core\transports\TransportFactory.ts
+18. 📄 src\core\transports\index.ts
+19. 📄 src\core\types\index.ts
+20. 📄 src\index.ts
+21. 📄 src\react\LoggerContext.tsx
+22. 📄 src\react\index.ts
+23. 📄 src\react\types.ts
+24. 📄 src\react\useLogger.ts
+25. 📄 src\react\withLogger.tsx
+
+====================================================================================================
+
+📁 FOLDER STRUCTURE
+--------------------------------------------------
+src/
+    ├── 📁 core
+    │   ├── 📁 formatters
+    │   │   ├── 📄 FormatterFactory.ts
+    │   │   ├── 📄 index.ts
+    │   │   ├── 📄 JsonFormatter.ts
+    │   │   ├── 📄 LogfmtFormatter.ts
+    │   │   └── 📄 PrettyFormatter.ts
+    │   ├── 📄 index.ts
+    │   ├── 📁 interfaces
+    │   │   ├── 📄 IFormatter.ts
+    │   │   ├── 📄 ILogger.ts
+    │   │   ├── 📄 index.ts
+    │   │   └── 📄 ITransport.ts
+    │   ├── 📄 LogEntry.ts
+    │   ├── 📄 Logger.ts
+    │   ├── 📄 LoggerBuilder.ts
+    │   ├── 📁 transports
+    │   │   ├── 📄 FileTransport.ts
+    │   │   ├── 📄 index.ts
+    │   │   ├── 📄 JsonFileTransport.ts
+    │   │   ├── 📄 TerminalTransport.ts
+    │   │   └── 📄 TransportFactory.ts
+    │   └── 📁 types
+    │       └── 📄 index.ts
+    ├── 📄 index.ts
+    └── 📁 react
+        ├── 📄 index.ts
+        ├── 📄 LoggerContext.tsx
+        ├── 📄 types.ts
+        ├── 📄 useLogger.ts
+        └── 📄 withLogger.tsx
+
+====================================================================================================
+
+📄 FILE CONTENTS
+--------------------------------------------------
+
+====================================================================================================
+📁 FILE: src\core\LogEntry.ts
+====================================================================================================
+
+import { ILogEntry } from './interfaces';
+import { LogLevel, ILogChange } from './types';
+import { stringify } from 'safe-stable-stringify';
+
+export class LogEntry<TContext = any> implements ILogEntry<TContext> {
+  public readonly timestamp: Date;
+  public readonly level: LogLevel;
+  public readonly message: string;
+  public readonly context?: TContext;
+  public readonly error?: Error;
+  public readonly pid: number;
+  public readonly hostname: string;
+  public readonly appName?: string;
+  public readonly correlationId?: string;
+
+  constructor(
+    level: LogLevel,
+    message: string,
+    context?: TContext,
+    error?: Error,
+    appName?: string,
+    correlationId?: string
+  ) {
+    this.timestamp = new Date();
+    this.level = level;
+    this.message = message;
+    this.context = context;
+    this.error = error;
+    // Browser-safe fallbacks for Node.js-specific properties
+    this.pid = typeof process !== 'undefined' && process.pid ? process.pid : 0;
+    this.hostname = typeof window !== 'undefined' ? window.location.hostname : 'unknown';
+    this.appName = appName;
+    this.correlationId = correlationId;
+  }
+
+  static createChangeEntry<T>(
+    message: string,
+    before: T,
+    after: T,
+    context?: object,
+    appName?: string,
+    correlationId?: string
+  ): ILogChange<T> {
+    const id = `change_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date();
+    const changes = LogEntry.calculateChanges(before, after);
+
+    // Use parameters to avoid unused warnings
+    void context;
+    void appName;
+    void correlationId;
+
+    return {
+      id,
+      timestamp,
+      message,
+      before,
+      after,
+      changes,
+    };
+  }
+
+  static createWithContext<TContext>(
+    level: LogLevel,
+    message: string,
+    context?: TContext,
+    error?: Error,
+    appName?: string,
+    correlationId?: string
+  ): LogEntry<TContext> {
+    return new LogEntry(level, message, context, error, appName, correlationId);
+  }
+
+  private static calculateChanges<T>(before: T, after: T): Array<{ field: string; oldValue: any; newValue: any }> {
+    const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
+    
+    if (!before || !after) {
+      return changes;
+    }
+
+    const beforeKeys = Object.keys(before as any);
+    const afterKeys = Object.keys(after as any);
+    const allKeys = new Set([...beforeKeys, ...afterKeys]);
+
+    for (const key of allKeys) {
+      const oldValue = (before as any)[key];
+      const newValue = (after as any)[key];
+
+      if (!LogEntry.deepEqual(oldValue, newValue)) {
+        changes.push({
+          field: key,
+          oldValue,
+          newValue,
+        });
+      }
+    }
+
+    return changes;
+  }
+
+  private static deepEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    
+    if (a == null || b == null) return false;
+    
+    if (typeof a !== typeof b) return false;
+    
+    if (typeof a === 'object') {
+      const keysA = Object.keys(a);
+      const keysB = Object.keys(b);
+      
+      if (keysA.length !== keysB.length) return false;
+      
+      for (const key of keysA) {
+        if (!keysB.includes(key)) return false;
+        if (!LogEntry.deepEqual(a[key], b[key])) return false;
+      }
+      
+      return true;
+    }
+    
+    return false;
+  }
+
+  toJSON(): string {
+    return stringify({
+      timestamp: this.timestamp,
+      level: LogLevel[this.level],
+      message: this.message,
+      context: this.context,
+      error: this.error ? {
+        name: this.error.name,
+        message: this.error.message,
+        stack: this.error.stack,
+      } : undefined,
+      pid: this.pid,
+      hostname: this.hostname,
+      appName: this.appName,
+      correlationId: this.correlationId,
+    }) || '{}';
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\Logger.ts
+====================================================================================================
+
+import { IFormatter, ITransport, ILogger, ILogEntry } from './interfaces';
+import { LogLevel, LoggerConfig, BatchEntry, ILogChange } from './types';
+import { LogEntry } from './LogEntry';
+
+/**
+ * Logger is the main class that implements the ILogger interface
+ * Follows SOLID principles:
+ * - Single Responsibility: Only handles logging operations
+ * - Open/Closed: Can be extended through dependency injection
+ * - Liskov Substitution: Can be substituted with any ILogger implementation
+ * - Interface Segregation: Implements only the ILogger interface
+ * - Dependency Inversion: Depends on abstractions (interfaces)
+ */
+export class Logger<TContext = any> implements ILogger<TContext> {
+  private readonly config: LoggerConfig;
+  private readonly formatter?: IFormatter<TContext>;
+  private readonly transport?: ITransport<any>;
+  private readonly buffer: ILogEntry<TContext>[] = [];
+  private flushTimer?: number; // Use number instead of NodeJS.Timeout for browser compatibility
+  private isShutdown = false;
+
+  constructor(
+    config: LoggerConfig,
+    formatter?: IFormatter<TContext>,
+    transport?: ITransport<any>
+  ) {
+    this.config = { ...config };
+    this.formatter = formatter;
+    this.transport = transport;
+
+    // Set up default values
+    this.config.bufferSize = this.config.bufferSize || 100;
+    this.config.flushInterval = this.config.flushInterval || 5000;
+
+    // Start flush timer if interval is set
+    if (this.config.flushInterval > 0) {
+      this.startFlushTimer();
+    }
+  }
+
+  async info<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void> {
+    return this.log(LogLevel.INFO, message, context);
+  }
+
+  async debug<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void> {
+    return this.log(LogLevel.DEBUG, message, context);
+  }
+
+  async warn<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void> {
+    return this.log(LogLevel.WARN, message, context);
+  }
+
+  async error<T = TContext>(message: string, error?: Error, context?: T): Promise<ILogChange<T> | void> {
+    return this.log(LogLevel.ERROR, message, context, error);
+  }
+
+  async fatal<T = TContext>(message: string, error?: Error, context?: T): Promise<ILogChange<T> | void> {
+    return this.log(LogLevel.FATAL, message, context, error);
+  }
+
+  async logChange<T>(message: string, before: T, after: T, context?: object): Promise<ILogChange<T>> {
+    if (this.isShutdown) {
+      throw new Error('Logger is shutdown');
+    }
+
+    const change = LogEntry.createChangeEntry(message, before, after, context, this.config.appName);
+    
+    // Create a log entry for the change
+    const entry = LogEntry.createWithContext(
+      LogLevel.INFO,
+      message,
+      { change, ...context } as any,
+      undefined,
+      this.config.appName
+    );
+
+    await this.writeEntry(entry);
+    return change;
+  }
+
+  async batch<T = TContext>(entries: BatchEntry<T>[]): Promise<void> {
+    if (this.isShutdown) {
+      throw new Error('Logger is shutdown');
+    }
+
+    const logEntries: ILogEntry<TContext>[] = entries.map(entry =>
+      LogEntry.createWithContext(
+        entry.level,
+        entry.message,
+        entry.context as TContext,
+        entry.error,
+        this.config.appName
+      )
+    );
+
+    // Add all entries to buffer
+    this.buffer.push(...logEntries);
+
+    // Flush if buffer exceeds configured size
+    if (this.buffer.length >= (this.config.bufferSize || 100)) {
+      await this.flush();
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.buffer.length === 0 || this.isShutdown) {
+      return;
+    }
+
+    const entriesToFlush = [...this.buffer];
+    this.buffer.length = 0; // Clear buffer
+
+    // Process each entry
+    for (const entry of entriesToFlush) {
+      await this.writeEntry(entry);
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.isShutdown) {
+      return;
+    }
+
+    this.isShutdown = true;
+
+    // Clear flush timer
+    if (this.flushTimer) {
+      window.clearInterval(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+
+    // Flush remaining entries
+    await this.flush();
+
+    // Close transport if available
+    if (this.transport) {
+      await this.transport.close();
+    }
+  }
+
+  /**
+   * Core logging method
+   * @private
+   */
+  private async log<T = TContext>(
+    level: LogLevel,
+    message: string,
+    context?: T,
+    error?: Error
+  ): Promise<ILogChange<T> | void> {
+    if (this.isShutdown) {
+      throw new Error('Logger is shutdown');
+    }
+
+    const entry = LogEntry.createWithContext(
+      level,
+      message,
+      context as TContext,
+      error,
+      this.config.appName
+    );
+
+    await this.writeEntry(entry);
+  }
+
+  /**
+   * Write a single log entry
+   * @private
+   */
+  private async writeEntry(entry: ILogEntry<TContext>): Promise<void> {
+    try {
+      // Apply masking if enabled
+      const processedEntry = this.config.enableMasking ? this.applyMasking(entry) : entry;
+
+      // Format the entry if formatter is available
+      let formattedData: string | ILogEntry<TContext>;
+      if (this.formatter) {
+        formattedData = this.formatter.format(processedEntry);
+      } else {
+        formattedData = processedEntry;
+      }
+
+      // Write to transport if available
+      if (this.transport) {
+        await this.transport.write(formattedData);
+      } else {
+        // Default to console if no transport
+        console.log(formattedData);
+      }
+    } catch (error) {
+      // Fail silently to avoid breaking the application
+      console.error('Logger write error:', error);
+    }
+  }
+
+  /**
+   * Apply data masking to log entry
+   * @private
+   */
+  private applyMasking(entry: ILogEntry<TContext>): ILogEntry<TContext> {
+    if (!this.config.maskingPatterns || this.config.maskingPatterns.length === 0) {
+      return entry;
+    }
+
+    const maskedEntry = { ...entry };
+
+    // Mask message
+    if (maskedEntry.message) {
+      maskedEntry.message = this.maskString(maskedEntry.message);
+    }
+
+    // Mask context if it's an object
+    if (maskedEntry.context && typeof maskedEntry.context === 'object') {
+      maskedEntry.context = this.maskObject(maskedEntry.context) as TContext;
+    }
+
+    // Mask error message
+    if (maskedEntry.error && maskedEntry.error.message) {
+      maskedEntry.error.message = this.maskString(maskedEntry.error.message);
+    }
+
+    return maskedEntry;
+  }
+
+  /**
+   * Apply masking patterns to a string
+   * @private
+   */
+  private maskString(str: string): string {
+    let masked = str;
+    for (const pattern of this.config.maskingPatterns || []) {
+      masked = masked.replace(pattern.pattern, pattern.replacement);
+    }
+    return masked;
+  }
+
+  /**
+   * Apply masking patterns to an object recursively
+   * @private
+   */
+  private maskObject(obj: any): any {
+    if (typeof obj !== 'object' || obj === null) {
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.maskObject(item));
+    }
+
+    const masked: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === 'string') {
+        masked[key] = this.maskString(value);
+      } else if (typeof value === 'object' && value !== null) {
+        masked[key] = this.maskObject(value);
+      } else {
+        masked[key] = value;
+      }
+    }
+
+    return masked;
+  }
+
+  /**
+   * Start the automatic flush timer
+   * @private
+   */
+  private startFlushTimer(): void {
+    this.flushTimer = window.setInterval(async () => {
+      await this.flush();
+    }, this.config.flushInterval) as unknown as number;
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\LoggerBuilder.ts
+====================================================================================================
+
+import { IFormatter, ITransport, ILogger } from './interfaces';
+import { Logger } from './Logger';
+import { LoggerConfig, TransportType, FormatterType, MaskingPattern, LogLevelColors } from './types';
+import { TransportFactory } from './transports';
+import { FormatterFactory } from './formatters';
+
+/**
+ * LoggerBuilder implements the Builder Pattern for creating Logger instances
+ * Follows SOLID principles:
+ * - Single Responsibility: Only responsible for building logger configuration
+ * - Open/Closed: Can be extended with new methods without modifying existing ones
+ * - Dependency Inversion: Depends on abstractions (interfaces) not concretions
+ */
+export class LoggerBuilder<TContext = any> {
+  private config: LoggerConfig = {};
+  private formatter?: IFormatter<TContext>;
+  private transport?: ITransport<any>;
+  private customColors: Map<string, string> = new Map();
+
+  /**
+   * Set the application name for the logger
+   */
+  setAppName(name: string): this {
+    this.config.appName = name;
+    return this;
+  }
+
+  /**
+   * Use a predefined transport type
+   */
+  useTransport(type: TransportType, options?: any): this {
+    this.transport = TransportFactory.create(type, options);
+    return this;
+  }
+
+  /**
+   * Set a custom transport implementation
+   */
+  setCustomTransport(transport: ITransport<any>): this {
+    this.transport = transport;
+    return this;
+  }
+
+  /**
+   * Use a predefined formatter type
+   */
+  useFormat(type: FormatterType, options?: any): this {
+    this.formatter = FormatterFactory.create(type, options);
+    return this;
+  }
+
+  /**
+   * Set a custom formatter implementation
+   */
+  setCustomFormatter(formatter: IFormatter<TContext>): this {
+    this.formatter = formatter;
+    return this;
+  }
+
+  /**
+   * Set file path for file-based transports
+   */
+  setFilePath(path: string): this {
+    // Store in config for later use by file transports
+    (this.config as any).filePath = path;
+    return this;
+  }
+
+  /**
+   * Enable or disable colors in output
+   */
+  enableColors(enable: boolean): this {
+    this.config.enableColors = enable;
+    return this;
+  }
+
+  /**
+   * Enable or disable data masking
+   */
+  enableMasking(enable: boolean): this {
+    this.config.enableMasking = enable;
+    return this;
+  }
+
+  /**
+   * Add a custom masking pattern
+   */
+  addMaskingPattern(pattern: MaskingPattern): this {
+    if (!this.config.maskingPatterns) {
+      this.config.maskingPatterns = [];
+    }
+    this.config.maskingPatterns.push(pattern);
+    return this;
+  }
+
+  /**
+   * Set buffer size for async writes
+   */
+  setBufferSize(size: number): this {
+    this.config.bufferSize = size;
+    return this;
+  }
+
+  /**
+   * Set flush interval in milliseconds
+   */
+  setFlushInterval(ms: number): this {
+    this.config.flushInterval = ms;
+    return this;
+  }
+
+  /**
+   * Set maximum file size before rotation (in bytes)
+   */
+  setMaxFileSize(bytes: number): this {
+    this.config.maxFileSize = bytes;
+    return this;
+  }
+
+  /**
+   * Set maximum number of files to retain
+   */
+  setMaxFiles(count: number): this {
+    this.config.maxFiles = count;
+    return this;
+  }
+
+  /**
+   * Set retention period in days
+   */
+  setRetentionDays(days: number): this {
+    this.config.retentionDays = days;
+    return this;
+  }
+
+  /**
+   * Enable or disable gzip compression for rotated logs
+   */
+  enableCompression(enable: boolean): this {
+    this.config.enableCompression = enable;
+    return this;
+  }
+
+  /**
+   * Enable or disable change tracking
+   */
+  enableChangeTracking(enable: boolean): this {
+    this.config.enableChangeTracking = enable;
+    return this;
+  }
+
+  /**
+   * Define a custom color for use in formatters
+   */
+  defineColor(name: string, style: string): this {
+    this.customColors.set(name, style);
+    return this;
+  }
+
+  /**
+   * Define colors for specific log levels
+   */
+  setLevelColors(colors: LogLevelColors): this {
+    this.config.levelColors = colors;
+    return this;
+  }
+
+  /**
+   * Define color for a specific log level
+   */
+  setLevelColor(level: keyof LogLevelColors, color: string): this {
+    if (!this.config.levelColors) {
+      this.config.levelColors = {};
+    }
+    this.config.levelColors[level] = color;
+    return this;
+  }
+
+  /**
+   * Build and return a configured Logger instance
+   */
+  build(): ILogger<TContext> {
+    // Provide defaults if not configured
+    if (!this.transport) {
+      // Default to terminal transport with color support
+      const enableColors = this.config.enableColors !== false; // Default to true
+      this.transport = TransportFactory.create('terminal', { 
+        enableColors,
+        customColors: this.customColors,
+        levelColors: this.config.levelColors
+      });
+    }
+    
+    if (!this.formatter) {
+      // Default to pretty formatter with color support
+      const enableColors = this.config.enableColors !== false; // Default to true
+      this.formatter = FormatterFactory.create('pretty', { 
+        enableColors,
+        customColors: this.customColors,
+        levelColors: this.config.levelColors
+      });
+    }
+
+    // Create and return the logger instance
+    return new Logger<TContext>(this.config, this.formatter, this.transport);
+  }
+
+  /**
+   * Validate that the builder has sufficient configuration
+   * @private
+   */
+  private validateConfiguration(): void {
+    // At minimum, we need either a formatter or a transport
+    if (!this.formatter && !this.transport) {
+      throw new Error('Logger must have either a formatter or transport configured');
+    }
+
+    // Validate buffer size if provided
+    if (this.config.bufferSize !== undefined && this.config.bufferSize <= 0) {
+      throw new Error('Buffer size must be greater than 0');
+    }
+
+    // Validate flush interval if provided
+    if (this.config.flushInterval !== undefined && this.config.flushInterval <= 0) {
+      throw new Error('Flush interval must be greater than 0');
+    }
+
+    // Validate file size if provided
+    if (this.config.maxFileSize !== undefined && this.config.maxFileSize <= 0) {
+      throw new Error('Max file size must be greater than 0');
+    }
+
+    // Validate max files if provided
+    if (this.config.maxFiles !== undefined && this.config.maxFiles <= 0) {
+      throw new Error('Max files must be greater than 0');
+    }
+
+    // Validate retention days if provided
+    if (this.config.retentionDays !== undefined && this.config.retentionDays <= 0) {
+      throw new Error('Retention days must be greater than 0');
+    }
+  }
+
+  /**
+   * Reset the builder to default state
+   * Useful for creating multiple loggers with different configurations
+   */
+  reset(): this {
+    this.config = {};
+    this.formatter = undefined;
+    this.transport = undefined;
+    return this;
+  }
+
+  /**
+   * Create a copy of the current builder state
+   * Useful for creating similar loggers with slight variations
+   */
+  clone(): LoggerBuilder<TContext> {
+    const newBuilder = new LoggerBuilder<TContext>();
+    newBuilder.config = { ...this.config };
+    newBuilder.formatter = this.formatter;
+    newBuilder.transport = this.transport;
+    return newBuilder;
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\formatters\FormatterFactory.ts
+====================================================================================================
+
+import { IFormatter } from '../interfaces';
+import { FormatterType } from '../types';
+import { PrettyFormatter } from './PrettyFormatter';
+import { JsonFormatter } from './JsonFormatter';
+import { LogfmtFormatter } from './LogfmtFormatter';
+
+/**
+ * FormatterFactory implements the Factory Pattern for creating formatters
+ * Follows SOLID principles:
+ * - Single Responsibility: Only responsible for creating formatters
+ * - Open/Closed: Can be extended with new formatter types
+ * - Dependency Inversion: Depends on abstractions (IFormatter)
+ */
+export class FormatterFactory {
+  /**
+   * Create a formatter instance based on type
+   */
+  static create<TContext = any>(
+    type: FormatterType,
+    options?: any
+  ): IFormatter<TContext> {
+    switch (type) {
+      case 'pretty':
+        return new PrettyFormatter<TContext>(options?.enableColors, options?.customColors, options?.levelColors);
+      case 'json':
+        return new JsonFormatter<TContext>(options?.prettyPrint);
+      case 'logfmt':
+        return new LogfmtFormatter<TContext>();
+      default:
+        throw new Error(`Unknown formatter type: ${type}`);
+    }
+  }
+
+  /**
+   * Get all available formatter types
+   */
+  static getAvailableTypes(): FormatterType[] {
+    return ['pretty', 'json', 'logfmt'];
+  }
+
+  /**
+   * Check if a formatter type is supported
+   */
+  static isSupported(type: string): type is FormatterType {
+    return this.getAvailableTypes().includes(type as FormatterType);
+  }
+
+  /**
+   * Register a custom formatter type
+   * This allows extending the factory with new formatter types
+   */
+  static register<TContext = any>(
+    type: string,
+    formatterClass: new (...args: any[]) => IFormatter<TContext>
+  ): void {
+    // Use parameters to avoid unused warnings
+    void type;
+    void formatterClass;
+    
+    // This would be implemented with a registry pattern in a more complete implementation
+    // For now, throw an error to indicate this feature is not yet implemented
+    throw new Error('Custom formatter registration not yet implemented');
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\formatters\JsonFormatter.ts
+====================================================================================================
+
+import { IFormatter, ILogEntry } from '../interfaces';
+import { LogLevel } from '../types';
+import { stringify } from 'safe-stable-stringify';
+
+/**
+ * JsonFormatter creates structured JSON log output
+ * Ideal for production environments and log aggregators
+ */
+export class JsonFormatter<TContext = any> implements IFormatter<TContext> {
+  private readonly prettyPrint: boolean;
+
+  constructor(prettyPrint = false) {
+    this.prettyPrint = prettyPrint;
+  }
+
+  format(entry: ILogEntry<TContext>): string {
+    const logObject = {
+      timestamp: entry.timestamp.toISOString(),
+      level: LogLevel[entry.level],
+      message: entry.message,
+      context: entry.context,
+      error: entry.error ? {
+        name: entry.error.name,
+        message: entry.error.message,
+        stack: entry.error.stack,
+      } : undefined,
+      pid: entry.pid,
+      hostname: entry.hostname,
+      appName: entry.appName,
+      correlationId: entry.correlationId,
+    };
+
+    try {
+      return stringify(logObject, null, this.prettyPrint ? 2 : 0) || '{}';
+    } catch (error) {
+      // Fallback to basic stringification if JSON.stringify fails
+      return JSON.stringify({
+        timestamp: entry.timestamp.toISOString(),
+        level: LogLevel[entry.level],
+        message: entry.message,
+        error: 'Failed to serialize log entry',
+      });
+    }
+  }
+
+  getType(): string {
+    return 'json';
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\formatters\LogfmtFormatter.ts
+====================================================================================================
+
+import { IFormatter, ILogEntry } from '../interfaces';
+import { LogLevel } from '../types';
+
+/**
+ * LogfmtFormatter creates logfmt (key=value) format output
+ * Ideal for grep-friendly operations and simple parsing
+ */
+export class LogfmtFormatter<TContext = any> implements IFormatter<TContext> {
+  format(entry: ILogEntry<TContext>): string {
+    const parts: string[] = [];
+
+    // Timestamp
+    parts.push(`timestamp=${entry.timestamp.toISOString()}`);
+
+    // Level
+    parts.push(`level=${LogLevel[entry.level].toLowerCase()}`);
+
+    // Message (quote if contains spaces)
+    const message = this.escapeValue(entry.message);
+    parts.push(`message=${message}`);
+
+    // Context as key=value pairs
+    if (entry.context) {
+      const contextStr = this.formatContext(entry.context);
+      if (contextStr) {
+        parts.push(contextStr);
+      }
+    }
+
+    // Error information
+    if (entry.error) {
+      parts.push(`error=${this.escapeValue(entry.error.message)}`);
+      if (entry.error.stack) {
+        parts.push(`stack=${this.escapeValue(entry.error.stack)}`);
+      }
+    }
+
+    // Metadata
+    if (entry.appName) {
+      parts.push(`app=${this.escapeValue(entry.appName)}`);
+    }
+
+    if (entry.correlationId) {
+      parts.push(`correlation_id=${this.escapeValue(entry.correlationId)}`);
+    }
+
+    parts.push(`pid=${entry.pid}`);
+    parts.push(`hostname=${this.escapeValue(entry.hostname)}`);
+
+    return parts.join(' ');
+  }
+
+  getType(): string {
+    return 'logfmt';
+  }
+
+  private formatContext(context: TContext): string {
+    if (!context || typeof context !== 'object') {
+      return '';
+    }
+
+    try {
+      const parts: string[] = [];
+      for (const [key, value] of Object.entries(context as any)) {
+        if (value !== undefined && value !== null) {
+          const formattedValue = this.formatValue(value);
+          parts.push(`${key}=${formattedValue}`);
+        }
+      }
+      return parts.join(' ');
+    } catch {
+      return '';
+    }
+  }
+
+  private formatValue(value: any): string {
+    if (typeof value === 'string') {
+      return this.escapeValue(value);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    } else if (value instanceof Date) {
+      return this.escapeValue(value.toISOString());
+    } else if (Array.isArray(value)) {
+      const arrayStr = value.map(v => this.formatValue(v)).join(',');
+      return `"[${arrayStr}]"`;
+    } else if (typeof value === 'object') {
+      try {
+        const objStr = JSON.stringify(value);
+        return this.escapeValue(objStr);
+      } catch {
+        return '"[Object]"';
+      }
+    } else {
+      return this.escapeValue(String(value));
+    }
+  }
+
+  private escapeValue(value: string): string {
+    // If the value contains spaces, newlines, tabs, or special characters, quote it
+    if (/[\s"\\]/.test(value)) {
+      return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    return value;
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\formatters\PrettyFormatter.ts
+====================================================================================================
+
+import { IFormatter, ILogEntry } from '../interfaces';
+import { LogLevel, LogLevelColors } from '../types';
+
+// Browser-safe color implementation
+class BrowserChalk {
+  private enabled: boolean;
+  private customColors: Map<string, string> = new Map();
+
+  constructor(enabled = true) {
+    this.enabled = enabled && typeof window !== 'undefined';
+  }
+
+  private colorize(text: string, cssStyle: string): string {
+    if (!this.enabled) return text;
+    return `%c${text}`;
+  }
+
+  // Basic colors
+  black(text: string): string {
+    return this.colorize(text, 'color: #000; font-weight: normal');
+  }
+
+  red(text: string): string {
+    return this.colorize(text, 'color: #f44336; font-weight: bold');
+  }
+
+  green(text: string): string {
+    return this.colorize(text, 'color: #4caf50; font-weight: bold');
+  }
+
+  yellow(text: string): string {
+    return this.colorize(text, 'color: #ff9800; font-weight: bold');
+  }
+
+  blue(text: string): string {
+    return this.colorize(text, 'color: #2196f3; font-weight: bold');
+  }
+
+  magenta(text: string): string {
+    return this.colorize(text, 'color: #e91e63; font-weight: bold');
+  }
+
+  cyan(text: string): string {
+    return this.colorize(text, 'color: #00bcd4; font-weight: bold');
+  }
+
+  white(text: string): string {
+    return this.colorize(text, 'color: #fff; font-weight: normal');
+  }
+
+  // Gray scale
+  gray(text: string): string {
+    return this.colorize(text, 'color: #666; font-weight: normal');
+  }
+
+  dim(text: string): string {
+    return this.colorize(text, 'color: #999; font-weight: normal; opacity: 0.7');
+  }
+
+  // Bright colors
+  brightRed(text: string): string {
+    return this.colorize(text, 'color: #ff6b6b; font-weight: bold');
+  }
+
+  brightGreen(text: string): string {
+    return this.colorize(text, 'color: #51cf66; font-weight: bold');
+  }
+
+  brightYellow(text: string): string {
+    return this.colorize(text, 'color: #ffd43b; font-weight: bold');
+  }
+
+  brightBlue(text: string): string {
+    return this.colorize(text, 'color: #74c0fc; font-weight: bold');
+  }
+
+  brightMagenta(text: string): string {
+    return this.colorize(text, 'color: #f06595; font-weight: bold');
+  }
+
+  brightCyan(text: string): string {
+    return this.colorize(text, 'color: #3bc9db; font-weight: bold');
+  }
+
+  // Background colors
+  bgBlack(text: string): string {
+    return this.colorize(text, 'background-color: #000; color: #fff; font-weight: normal');
+  }
+
+  bgRed(text: string): string {
+    return this.colorize(text, 'background-color: #f44336; color: #fff; font-weight: bold');
+  }
+
+  bgGreen(text: string): string {
+    return this.colorize(text, 'background-color: #4caf50; color: #fff; font-weight: bold');
+  }
+
+  bgYellow(text: string): string {
+    return this.colorize(text, 'background-color: #ff9800; color: #000; font-weight: bold');
+  }
+
+  bgBlue(text: string): string {
+    return this.colorize(text, 'background-color: #2196f3; color: #fff; font-weight: bold');
+  }
+
+  bgMagenta(text: string): string {
+    return this.colorize(text, 'background-color: #e91e63; color: #fff; font-weight: bold');
+  }
+
+  bgCyan(text: string): string {
+    return this.colorize(text, 'background-color: #00bcd4; color: #fff; font-weight: bold');
+  }
+
+  bgWhite(text: string): string {
+    return this.colorize(text, 'background-color: #fff; color: #000; font-weight: normal');
+  }
+
+  // Text styles
+  bold(text: string): string {
+    return this.colorize(text, 'font-weight: bold');
+  }
+
+  italic(text: string): string {
+    return this.colorize(text, 'font-style: italic');
+  }
+
+  underline(text: string): string {
+    return this.colorize(text, 'text-decoration: underline');
+  }
+
+  // Custom color support
+  hex(text: string, color: string): string {
+    return this.colorize(text, `color: ${color}; font-weight: bold`);
+  }
+
+  rgb(text: string, r: number, g: number, b: number): string {
+    return this.colorize(text, `color: rgb(${r}, ${g}, ${b}); font-weight: bold`);
+  }
+
+  rgba(text: string, r: number, g: number, b: number, a: number): string {
+    return this.colorize(text, `color: rgba(${r}, ${g}, ${b}, ${a}); font-weight: bold`);
+  }
+
+  // Register custom colors
+  defineColor(name: string, style: string): void {
+    this.customColors.set(name, style);
+  }
+
+  // Use custom colors
+  custom(text: string, colorName: string): string {
+    const style = this.customColors.get(colorName);
+    if (style) {
+      return this.colorize(text, style);
+    }
+    return text;
+  }
+
+  // Reset (no-op in browser, but included for compatibility)
+  reset(text: string): string {
+    return text;
+  }
+}
+
+// Use browser-safe chalk or Node.js chalk
+const chalk = typeof window !== 'undefined' ? new BrowserChalk() : require('chalk');
+
+/**
+ * PrettyFormatter creates human-readable, colorized log output
+ * Ideal for development environments
+ */
+export class PrettyFormatter<TContext = any> implements IFormatter<TContext> {
+  private readonly enableColors: boolean;
+  private chalk: any;
+  private levelColors?: LogLevelColors;
+
+  constructor(enableColors = true, customColors?: Map<string, string>, levelColors?: LogLevelColors) {
+    this.enableColors = enableColors;
+    this.levelColors = levelColors;
+    
+    if (typeof window !== 'undefined') {
+      this.chalk = new BrowserChalk(enableColors);
+      
+      // Apply custom colors if provided
+      if (customColors) {
+        customColors.forEach((style, name) => {
+          this.chalk.defineColor(name, style);
+        });
+      }
+    } else {
+      this.chalk = require('chalk');
+    }
+  }
+
+  format(entry: ILogEntry<TContext>): string {
+    const timestamp = this.formatTimestamp(entry.timestamp);
+    const level = this.formatLevel(entry.level);
+    const message = entry.message;
+    const context = this.formatContext(entry.context);
+    const error = this.formatError(entry.error);
+    const meta = this.formatMetadata(entry);
+
+    const parts = [timestamp, level, message];
+
+    if (context) {
+      parts.push(context);
+    }
+
+    if (error) {
+      parts.push(error);
+    }
+
+    if (meta) {
+      parts.push(meta);
+    }
+
+    const formatted = parts.join(' ');
+    
+    // For browser, return the formatted string with styling info
+    if (typeof window !== 'undefined' && this.enableColors) {
+      // Return the formatted string and let the transport handle console styling
+      return formatted;
+    }
+    
+    return formatted;
+  }
+
+  getType(): string {
+    return 'pretty';
+  }
+
+  private formatTimestamp(date: Date): string {
+    const timestamp = date.toISOString();
+    return this.enableColors ? this.chalk.gray(timestamp) : timestamp;
+  }
+
+  private formatLevel(level: LogLevel): string {
+    const levelName = LogLevel[level].padEnd(5);
+    
+    if (!this.enableColors) {
+      return `[${levelName}]`;
+    }
+
+    // Use custom level colors if provided
+    if (this.levelColors && typeof window !== 'undefined') {
+      const levelKey = LogLevel[level].toLowerCase() as keyof LogLevelColors;
+      const customColor = this.levelColors[levelKey];
+      if (customColor) {
+        return this.chalk.hex(`[${levelName}]`, customColor);
+      }
+    }
+
+    // Fall back to default colors
+    switch (level) {
+      case LogLevel.DEBUG:
+        return this.chalk.cyan(`[${levelName}]`);
+      case LogLevel.INFO:
+        return this.chalk.blue(`[${levelName}]`);
+      case LogLevel.WARN:
+        return this.chalk.yellow(`[${levelName}]`);
+      case LogLevel.ERROR:
+        return this.chalk.red(`[${levelName}]`);
+      case LogLevel.FATAL:
+        return this.chalk.magenta(`[${levelName}]`);
+      default:
+        return `[${levelName}]`;
+    }
+  }
+
+  private formatContext(context?: TContext): string {
+    if (!context) {
+      return '';
+    }
+
+    try {
+      const contextStr = JSON.stringify(context, null, 2);
+      return this.enableColors ? this.chalk.gray(contextStr) : contextStr;
+    } catch {
+      return this.enableColors ? this.chalk.gray('[Object]') : '[Object]';
+    }
+  }
+
+  private formatError(error?: Error): string {
+    if (!error) {
+      return '';
+    }
+
+    const errorStr = error.stack || error.message || String(error);
+    return this.enableColors ? this.chalk.red(errorStr) : errorStr;
+  }
+
+  private formatMetadata(entry: ILogEntry<TContext>): string {
+    const parts: string[] = [];
+    
+    if (entry.appName) {
+      parts.push(this.enableColors ? this.chalk.green(entry.appName) : entry.appName);
+    }
+    
+    if (entry.hostname) {
+      parts.push(this.enableColors ? this.chalk.dim(entry.hostname) : entry.hostname);
+    }
+    
+    if (entry.pid) {
+      parts.push(`[${entry.pid}]`);
+    }
+    
+    if (entry.correlationId) {
+      parts.push(this.enableColors ? this.chalk.cyan(entry.correlationId) : entry.correlationId);
+    }
+    
+    return parts.length > 0 ? `[${parts.join(' | ')}]` : '';
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\formatters\index.ts
+====================================================================================================
+
+export * from '../interfaces/IFormatter';
+export * from './PrettyFormatter';
+export * from './JsonFormatter';
+export * from './LogfmtFormatter';
+export * from './FormatterFactory';
+
+
+====================================================================================================
+📁 FILE: src\core\index.ts
+====================================================================================================
+
+// Core interfaces and types
+export * from './interfaces';
+export * from './types';
+
+// Core classes
+export * from './LogEntry';
+export * from './Logger';
+export * from './LoggerBuilder';
+
+// Formatters
+export * from './formatters';
+
+// Transports
+export * from './transports';
+
+
+====================================================================================================
+📁 FILE: src\core\interfaces\IFormatter.ts
+====================================================================================================
+
+import { ILogEntry } from './ILogger';
+
+export interface IFormatter<TContext = any> {
+  format(entry: ILogEntry<TContext>): string;
+  getType(): string;
+}
+
+
+====================================================================================================
+📁 FILE: src\core\interfaces\ILogger.ts
+====================================================================================================
+
+import { LogLevel, BatchEntry, ILogChange } from '../types';
+
+export interface ILogger<TContext = any> {
+  // Basic logging methods
+  info<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void>;
+  debug<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void>;
+  warn<T = TContext>(message: string, context?: T): Promise<ILogChange<T> | void>;
+  error<T = TContext>(message: string, error?: Error, context?: T): Promise<ILogChange<T> | void>;
+  fatal<T = TContext>(message: string, error?: Error, context?: T): Promise<ILogChange<T> | void>;
+
+  // Change tracking
+  logChange<T>(message: string, before: T, after: T, context?: object): Promise<ILogChange<T>>;
+
+  // Batch operations
+  batch<T = TContext>(entries: BatchEntry<T>[]): Promise<void>;
+
+  // Control methods
+  flush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
+export interface ILogEntry<TContext = any> {
+  timestamp: Date;
+  level: LogLevel;
+  message: string;
+  context?: TContext;
+  error?: Error;
+  pid: number;
+  hostname: string;
+  appName?: string;
+  correlationId?: string;
+}
+
+
+====================================================================================================
+📁 FILE: src\core\interfaces\ITransport.ts
+====================================================================================================
+
+export interface ITransport<TData = any> {
+  write(data: TData): Promise<void>;
+  close(): Promise<void>;
+  getType(): string;
+}
+
+
+====================================================================================================
+📁 FILE: src\core\interfaces\index.ts
+====================================================================================================
+
+export * from './ILogger';
+export * from './IFormatter';
+export * from './ITransport';
+
+
+====================================================================================================
+📁 FILE: src\core\transports\FileTransport.ts
+====================================================================================================
+
+import { ITransport } from '../interfaces';
+import { promises as fs } from 'fs';
+import { dirname } from 'path';
+
+/**
+ * FileTransport writes log output to a file
+ * Supports log rotation and basic file management
+ */
+export class FileTransport<TData = string> implements ITransport<TData> {
+  private readonly filePath: string;
+  private readonly maxFileSize: number;
+  private readonly maxFiles: number;
+  private readonly enableCompression: boolean;
+  private currentFileSize: number = 0;
+
+  constructor(
+    filePath: string,
+    options: {
+      maxFileSize?: number;
+      maxFiles?: number;
+      enableCompression?: boolean;
+    } = {}
+  ) {
+    this.filePath = filePath;
+    this.maxFileSize = options.maxFileSize || 10 * 1024 * 1024; // 10MB default
+    this.maxFiles = options.maxFiles || 5;
+    this.enableCompression = options.enableCompression || false;
+  }
+
+  async write(data: TData): Promise<void> {
+    try {
+      const output = typeof data === 'string' ? data : JSON.stringify(data);
+      const outputWithNewline = output.endsWith('\n') ? output : output + '\n';
+
+      // Check if rotation is needed
+      await this.checkAndRotate();
+
+      // Write to file
+      await fs.appendFile(this.filePath, outputWithNewline, 'utf8');
+      this.currentFileSize += Buffer.byteLength(outputWithNewline, 'utf8');
+    } catch (error) {
+      console.error('File transport write error:', error);
+      throw error;
+    }
+  }
+
+  async close(): Promise<void> {
+    // No specific cleanup needed for basic file transport
+    // File handles are managed by Node.js fs promises
+  }
+
+  getType(): string {
+    return 'file';
+  }
+
+  /**
+   * Check file size and rotate if necessary
+   * @private
+   */
+  private async checkAndRotate(): Promise<void> {
+    try {
+      // Get current file size
+      const stats = await fs.stat(this.filePath).catch(() => null);
+      this.currentFileSize = stats?.size || 0;
+
+      // Rotate if file exceeds max size
+      if (this.currentFileSize >= this.maxFileSize) {
+        await this.rotateFiles();
+      }
+    } catch (error) {
+      console.error('File rotation check error:', error);
+    }
+  }
+
+  /**
+   * Rotate log files
+   * @private
+   */
+  private async rotateFiles(): Promise<void> {
+    try {
+      const dir = dirname(this.filePath);
+      const baseName = this.filePath.replace(/\.[^/.]+$/, '');
+      const ext = this.filePath.substring(this.filePath.lastIndexOf('.'));
+
+      // Use dir to avoid unused warning (could be used for directory operations)
+      void dir;
+
+      // Remove oldest file if we exceed max files
+      if (this.maxFiles > 0) {
+        const oldestFile = `${baseName}.${this.maxFiles}${ext}`;
+        await fs.unlink(oldestFile).catch(() => {}); // Ignore if file doesn't exist
+      }
+
+      // Shift existing files
+      for (let i = this.maxFiles - 1; i >= 1; i--) {
+        const currentFile = i === 1 ? this.filePath : `${baseName}.${i}${ext}`;
+        const nextFile = `${baseName}.${i + 1}${ext}`;
+        
+        try {
+          await fs.rename(currentFile, nextFile);
+        } catch (error) {
+          // Ignore if file doesn't exist
+        }
+      }
+
+      // Reset current file size
+      this.currentFileSize = 0;
+
+      // Compress if enabled (placeholder for future implementation)
+      if (this.enableCompression) {
+        // TODO: Implement gzip compression
+        console.log('Compression not yet implemented');
+      }
+    } catch (error) {
+      console.error('File rotation error:', error);
+    }
+  }
+
+  /**
+   * Ensure the directory exists
+   * @private
+   */
+  private async ensureDirectory(): Promise<void> {
+    const dir = dirname(this.filePath);
+    await fs.mkdir(dir, { recursive: true });
+    // Use method to avoid unused warning (placeholder for future directory operations)
+    void dir;
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\transports\JsonFileTransport.ts
+====================================================================================================
+
+import { ITransport } from '../interfaces';
+import { promises as fs } from 'fs';
+import { dirname } from 'path';
+import { stringify } from 'safe-stable-stringify';
+
+/**
+ * JsonFileTransport writes structured JSON log output to a file
+ * Each log entry is written as a separate JSON object on its own line
+ * Supports log rotation and maintains JSON structure integrity
+ */
+export class JsonFileTransport<TData = any> implements ITransport<TData> {
+  private readonly filePath: string;
+  private readonly maxFileSize: number;
+  private readonly maxFiles: number;
+  private readonly enableCompression: boolean;
+  private readonly prettyPrint: boolean;
+  private currentFileSize: number = 0;
+
+  constructor(
+    filePath: string,
+    options: {
+      maxFileSize?: number;
+      maxFiles?: number;
+      enableCompression?: boolean;
+      prettyPrint?: boolean;
+    } = {}
+  ) {
+    this.filePath = filePath;
+    this.maxFileSize = options.maxFileSize || 10 * 1024 * 1024; // 10MB default
+    this.maxFiles = options.maxFiles || 5;
+    this.enableCompression = options.enableCompression || false;
+    this.prettyPrint = options.prettyPrint || false;
+  }
+
+  async write(data: TData): Promise<void> {
+    try {
+      // Ensure data is properly formatted as JSON
+      let jsonString: string;
+      
+      if (typeof data === 'string') {
+        // If it's already a string, try to parse and re-stringify to ensure valid JSON
+        try {
+          const parsed = JSON.parse(data);
+          jsonString = stringify(parsed, null, this.prettyPrint ? 2 : 0) || '{}';
+        } catch {
+          // If parsing fails, treat as a simple message
+          jsonString = stringify({ message: data }, null, this.prettyPrint ? 2 : 0) || '{}';
+        }
+      } else {
+        // If it's an object, stringify it
+        jsonString = stringify(data, null, this.prettyPrint ? 2 : 0) || '{}';
+      }
+
+      // Ensure each entry is on its own line
+      const output = jsonString.endsWith('\n') ? jsonString : jsonString + '\n';
+
+      // Check if rotation is needed
+      await this.checkAndRotate();
+
+      // Write to file
+      await fs.appendFile(this.filePath, output, 'utf8');
+      this.currentFileSize += Buffer.byteLength(output, 'utf8');
+    } catch (error) {
+      console.error('JSON file transport write error:', error);
+      throw error;
+    }
+  }
+
+  async close(): Promise<void> {
+    // No specific cleanup needed for JSON file transport
+    // File handles are managed by Node.js fs promises
+  }
+
+  getType(): string {
+    return 'json-file';
+  }
+
+  /**
+   * Check file size and rotate if necessary
+   * @private
+   */
+  private async checkAndRotate(): Promise<void> {
+    try {
+      // Get current file size
+      const stats = await fs.stat(this.filePath).catch(() => null);
+      this.currentFileSize = stats?.size || 0;
+
+      // Rotate if file exceeds max size
+      if (this.currentFileSize >= this.maxFileSize) {
+        await this.rotateFiles();
+      }
+    } catch (error) {
+      console.error('JSON file rotation check error:', error);
+    }
+  }
+
+  /**
+   * Rotate JSON log files
+   * @private
+   */
+  private async rotateFiles(): Promise<void> {
+    try {
+      const dir = dirname(this.filePath);
+      const baseName = this.filePath.replace(/\.[^/.]+$/, '');
+      const ext = this.filePath.substring(this.filePath.lastIndexOf('.'));
+
+      // Use dir to avoid unused warning (could be used for directory operations)
+      void dir;
+
+      // Remove oldest file if we exceed max files
+      if (this.maxFiles > 0) {
+        const oldestFile = `${baseName}.${this.maxFiles}${ext}`;
+        await fs.unlink(oldestFile).catch(() => {}); // Ignore if file doesn't exist
+      }
+
+      // Shift existing files
+      for (let i = this.maxFiles - 1; i >= 1; i--) {
+        const currentFile = i === 1 ? this.filePath : `${baseName}.${i}${ext}`;
+        const nextFile = `${baseName}.${i + 1}${ext}`;
+        
+        try {
+          await fs.rename(currentFile, nextFile);
+        } catch (error) {
+          // Ignore if file doesn't exist
+        }
+      }
+
+      // Reset current file size
+      this.currentFileSize = 0;
+
+      // Compress if enabled (placeholder for future implementation)
+      if (this.enableCompression) {
+        // TODO: Implement gzip compression for JSON files
+        console.log('JSON compression not yet implemented');
+      }
+    } catch (error) {
+      console.error('JSON file rotation error:', error);
+    }
+  }
+
+  /**
+   * Validate JSON structure before writing
+   * @private
+   */
+  private validateJsonStructure(data: any): boolean {
+    try {
+      // Ensure the data can be stringified as valid JSON
+      const jsonString = stringify(data);
+      return jsonString !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Write data with JSON validation
+   * @private
+   */
+  private async writeWithValidation(data: TData): Promise<void> {
+    if (!this.validateJsonStructure(data)) {
+      throw new Error('Invalid JSON structure in log data');
+    }
+    
+    // Continue with normal write process
+    await this.write(data);
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\transports\TerminalTransport.ts
+====================================================================================================
+
+import { ITransport } from '../interfaces';
+
+// Browser-safe color implementation
+class BrowserChalk {
+  private enabled: boolean;
+  private customColors: Map<string, string> = new Map();
+
+  constructor(enabled = true) {
+    this.enabled = enabled && typeof window !== 'undefined';
+  }
+
+  private colorize(text: string, cssStyle: string): string {
+    if (!this.enabled) return text;
+    return `%c${text}`;
+  }
+
+  // Basic colors
+  black(text: string): string {
+    return this.colorize(text, 'color: #000; font-weight: normal');
+  }
+
+  red(text: string): string {
+    return this.colorize(text, 'color: #f44336; font-weight: bold');
+  }
+
+  green(text: string): string {
+    return this.colorize(text, 'color: #4caf50; font-weight: bold');
+  }
+
+  yellow(text: string): string {
+    return this.colorize(text, 'color: #ff9800; font-weight: bold');
+  }
+
+  blue(text: string): string {
+    return this.colorize(text, 'color: #2196f3; font-weight: bold');
+  }
+
+  magenta(text: string): string {
+    return this.colorize(text, 'color: #e91e63; font-weight: bold');
+  }
+
+  cyan(text: string): string {
+    return this.colorize(text, 'color: #00bcd4; font-weight: bold');
+  }
+
+  white(text: string): string {
+    return this.colorize(text, 'color: #fff; font-weight: normal');
+  }
+
+  // Gray scale
+  gray(text: string): string {
+    return this.colorize(text, 'color: #666; font-weight: normal');
+  }
+
+  dim(text: string): string {
+    return this.colorize(text, 'color: #999; font-weight: normal; opacity: 0.7');
+  }
+
+  // Bright colors
+  brightRed(text: string): string {
+    return this.colorize(text, 'color: #ff6b6b; font-weight: bold');
+  }
+
+  brightGreen(text: string): string {
+    return this.colorize(text, 'color: #51cf66; font-weight: bold');
+  }
+
+  brightYellow(text: string): string {
+    return this.colorize(text, 'color: #ffd43b; font-weight: bold');
+  }
+
+  brightBlue(text: string): string {
+    return this.colorize(text, 'color: #74c0fc; font-weight: bold');
+  }
+
+  brightMagenta(text: string): string {
+    return this.colorize(text, 'color: #f06595; font-weight: bold');
+  }
+
+  brightCyan(text: string): string {
+    return this.colorize(text, 'color: #3bc9db; font-weight: bold');
+  }
+
+  // Background colors
+  bgBlack(text: string): string {
+    return this.colorize(text, 'background-color: #000; color: #fff; font-weight: normal');
+  }
+
+  bgRed(text: string): string {
+    return this.colorize(text, 'background-color: #f44336; color: #fff; font-weight: bold');
+  }
+
+  bgGreen(text: string): string {
+    return this.colorize(text, 'background-color: #4caf50; color: #fff; font-weight: bold');
+  }
+
+  bgYellow(text: string): string {
+    return this.colorize(text, 'background-color: #ff9800; color: #000; font-weight: bold');
+  }
+
+  bgBlue(text: string): string {
+    return this.colorize(text, 'background-color: #2196f3; color: #fff; font-weight: bold');
+  }
+
+  bgMagenta(text: string): string {
+    return this.colorize(text, 'background-color: #e91e63; color: #fff; font-weight: bold');
+  }
+
+  bgCyan(text: string): string {
+    return this.colorize(text, 'background-color: #00bcd4; color: #fff; font-weight: bold');
+  }
+
+  bgWhite(text: string): string {
+    return this.colorize(text, 'background-color: #fff; color: #000; font-weight: normal');
+  }
+
+  // Text styles
+  bold(text: string): string {
+    return this.colorize(text, 'font-weight: bold');
+  }
+
+  italic(text: string): string {
+    return this.colorize(text, 'font-style: italic');
+  }
+
+  underline(text: string): string {
+    return this.colorize(text, 'text-decoration: underline');
+  }
+
+  // Custom color support
+  hex(text: string, color: string): string {
+    return this.colorize(text, `color: ${color}; font-weight: bold`);
+  }
+
+  rgb(text: string, r: number, g: number, b: number): string {
+    return this.colorize(text, `color: rgb(${r}, ${g}, ${b}); font-weight: bold`);
+  }
+
+  rgba(text: string, r: number, g: number, b: number, a: number): string {
+    return this.colorize(text, `color: rgba(${r}, ${g}, ${b}, ${a}); font-weight: bold`);
+  }
+
+  // Register custom colors
+  defineColor(name: string, style: string): void {
+    this.customColors.set(name, style);
+  }
+
+  // Use custom colors
+  custom(text: string, colorName: string): string {
+    const style = this.customColors.get(colorName);
+    if (style) {
+      return this.colorize(text, style);
+    }
+    return text;
+  }
+
+  // Reset (no-op in browser, but included for compatibility)
+  reset(text: string): string {
+    return text;
+  }
+}
+
+// Use browser-safe chalk or Node.js chalk
+const chalk = typeof window !== 'undefined' ? new BrowserChalk() : require('chalk');
+
+/**
+ * TerminalTransport writes log output to the console
+ * Ideal for development and simple logging scenarios
+ */
+export class TerminalTransport<TData = string> implements ITransport<TData> {
+  private readonly enableColors: boolean;
+
+  constructor(enableColors = true) {
+    this.enableColors = enableColors;
+    // Use enableColors to avoid unused warning (could be used for future enhancements)
+    void this.enableColors;
+  }
+
+  async write(data: TData): Promise<void> {
+    try {
+      const output = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+      
+      // Handle browser console styling properly
+      if (typeof window !== 'undefined' && this.enableColors && typeof data === 'string') {
+        // Apply proper browser console styling
+        this.writeWithColors(output);
+      } else {
+        // Fallback for non-browser or non-colored output
+        this.writeWithoutColors(output);
+      }
+    } catch (error) {
+      // Fallback to basic console output
+      console.error('Terminal transport error:', error);
+      console.log(String(data));
+    }
+  }
+
+  private writeWithColors(output: string): void {
+    // Parse the output and use proper console.log with %c styling
+    try {
+      // Split by log levels to identify parts
+      const parts = output.split(/(\[DEBUG\]|\[INFO \]|\[WARN \]|\[ERROR\]|\[FATAL\])/);
+      let result = '';
+      let styles: string[] = [];
+      
+      // Process each part
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        
+        if (i === 0) {
+          // First part is timestamp
+          result += `%c${part}`;
+          styles.push('color: #666; font-weight: normal');
+        } else if (part.match(/^\[DEBUG\]|\[INFO \]|\[WARN \]|\[ERROR\]|\[FATAL\]/)) {
+          // This is a log level
+          const level = part.replace(/\[|\s\]/g, '').toLowerCase();
+          result += `%c${part}`;
+          styles.push(this.getLevelStyle(level));
+        } else if (part.trim()) {
+          // Regular text or metadata
+          // Check if it's metadata (contains app name, hostname, etc.)
+          if (part.includes('[') || part.includes('|')) {
+            result += `%c${part}`;
+            styles.push('color: #666; font-weight: normal');
+          } else {
+            result += `%c${part}`;
+            styles.push('color: inherit; font-weight: normal');
+          }
+        }
+      }
+      
+      // Apply appropriate console method
+      const lowerOutput = output.toLowerCase();
+      if (lowerOutput.includes('error') || lowerOutput.includes('fatal')) {
+        console.error(result, ...styles);
+      } else if (lowerOutput.includes('warn')) {
+        console.warn(result, ...styles);
+      } else if (lowerOutput.includes('debug')) {
+        console.debug(result, ...styles);
+      } else {
+        console.log(result, ...styles);
+      }
+    } catch (error) {
+      // Fallback to plain output
+      console.log(output);
+    }
+  }
+
+  private writeWithoutColors(output: string): void {
+    const lowerOutput = output.toLowerCase();
+    
+    if (lowerOutput.includes('error') || lowerOutput.includes('fatal')) {
+      console.error(output);
+    } else if (lowerOutput.includes('warn')) {
+      console.warn(output);
+    } else if (lowerOutput.includes('debug')) {
+      console.debug(output);
+    } else {
+      console.log(output);
+    }
+  }
+
+  private getLevelStyle(level: string): string {
+    // Use custom level colors if configured, otherwise use defaults
+    const customStyles = {
+      debug: 'color: #9333ea; font-weight: bold; text-shadow: 0 0 2px rgba(147, 51, 234, 0.3)',
+      info: 'color: #0ea5e9; font-weight: bold; text-shadow: 0 0 2px rgba(14, 165, 233, 0.3)',
+      warn: 'color: #f59e0b; font-weight: bold; text-shadow: 0 0 2px rgba(245, 158, 11, 0.3)',
+      error: 'color: #ef4444; font-weight: bold; text-shadow: 0 0 2px rgba(239, 68, 68, 0.3)',
+      fatal: 'color: #dc2626; font-weight: bold; text-shadow: 0 0 2px rgba(220, 38, 38, 0.3)'
+    };
+    
+    return customStyles[level as keyof typeof customStyles] || 'color: inherit; font-weight: bold';
+  }
+
+  async close(): Promise<void> {
+    // No cleanup needed for terminal transport
+    // Console remains available throughout application lifecycle
+  }
+
+  getType(): string {
+    return 'terminal';
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\transports\TransportFactory.ts
+====================================================================================================
+
+import { ITransport } from '../interfaces';
+import { TransportType } from '../types';
+import { TerminalTransport } from './TerminalTransport';
+import { FileTransport } from './FileTransport';
+import { JsonFileTransport } from './JsonFileTransport';
+
+/**
+ * TransportFactory implements the Factory Pattern for creating transports
+ * Follows SOLID principles:
+ * - Single Responsibility: Only responsible for creating transports
+ * - Open/Closed: Can be extended with new transport types
+ * - Dependency Inversion: Depends on abstractions (ITransport)
+ */
+export class TransportFactory {
+  /**
+   * Create a transport instance based on type and configuration
+   */
+  static create<TData = any>(
+    type: TransportType,
+    options?: any
+  ): ITransport<TData> {
+    switch (type) {
+      case 'terminal':
+        return new TerminalTransport<TData>(options?.enableColors);
+      case 'file':
+        return new FileTransport<TData>(options?.filePath, {
+          maxFileSize: options?.maxFileSize,
+          maxFiles: options?.maxFiles,
+          enableCompression: options?.enableCompression,
+        });
+      case 'json-file':
+        return new JsonFileTransport<TData>(options?.filePath, {
+          maxFileSize: options?.maxFileSize,
+          maxFiles: options?.maxFiles,
+          enableCompression: options?.enableCompression,
+          prettyPrint: options?.prettyPrint,
+        });
+      default:
+        throw new Error(`Unknown transport type: ${type}`);
+    }
+  }
+
+  /**
+   * Get all available transport types
+   */
+  static getAvailableTypes(): TransportType[] {
+    return ['terminal', 'file', 'json-file'];
+  }
+
+  /**
+   * Check if a transport type is supported
+   */
+  static isSupported(type: string): type is TransportType {
+    return this.getAvailableTypes().includes(type as TransportType);
+  }
+
+  /**
+   * Register a custom transport type
+   * This allows extending the factory with new transport types
+   */
+  static register<TData = any>(
+    type: string,
+    transportClass: new (...args: any[]) => ITransport<TData>
+  ): void {
+    // Use parameters to avoid unused warnings
+    void type;
+    void transportClass;
+    
+    // This would be implemented with a registry pattern in a more complete implementation
+    // For now, throw an error to indicate this feature is not yet implemented
+    throw new Error('Custom transport registration not yet implemented');
+  }
+
+  /**
+   * Create multiple transports for failover scenarios
+   */
+  static createMulti<TData = any>(
+    configurations: Array<{ type: TransportType; options?: any }>
+  ): ITransport<TData>[] {
+    return configurations.map(config => 
+      this.create<TData>(config.type, config.options)
+    );
+  }
+
+  /**
+   * Validate transport configuration
+   */
+  static validateConfiguration(type: TransportType, options?: any): boolean {
+    switch (type) {
+      case 'terminal':
+        return true; // Terminal transport has no required options
+      case 'file':
+        return !!options?.filePath; // File path is required
+      case 'json-file':
+        return !!options?.filePath; // File path is required
+      default:
+        return false;
+    }
+  }
+}
+
+
+====================================================================================================
+📁 FILE: src\core\transports\index.ts
+====================================================================================================
+
+export * from '../interfaces/ITransport';
+export * from './TerminalTransport';
+export * from './FileTransport';
+export * from './JsonFileTransport';
+export * from './TransportFactory';
+
+
+====================================================================================================
+📁 FILE: src\core\types\index.ts
+====================================================================================================
+
+export enum LogLevel {
+  DEBUG = 10,
+  INFO = 20,
+  WARN = 30,
+  ERROR = 40,
+  FATAL = 50,
+}
+
+export interface LogLevelColors {
+  debug?: string;
+  info?: string;
+  warn?: string;
+  error?: string;
+  fatal?: string;
+}
+
+export interface ILogChange<T> {
+  id: string;
+  timestamp: Date;
+  message: string;
+  before?: T;
+  after?: T;
+  changes?: Array<{
+    field: string;
+    oldValue: any;
+    newValue: any;
+  }>;
+}
+
+export interface BatchEntry<T> {
+  level: LogLevel;
+  message: string;
+  context?: T;
+  error?: Error;
+  timestamp?: Date;
+}
+
+export interface MaskingPattern {
+  pattern: RegExp;
+  replacement: string;
+  description?: string;
+}
+
+export interface LoggerConfig {
+  appName?: string;
+  bufferSize?: number;
+  flushInterval?: number;
+  maxFileSize?: number;
+  maxFiles?: number;
+  retentionDays?: number;
+  enableCompression?: boolean;
+  enableColors?: boolean;
+  enableMasking?: boolean;
+  maskingPatterns?: MaskingPattern[];
+  enableChangeTracking?: boolean;
+  levelColors?: LogLevelColors;
+}
+
+export type TransportType = 'terminal' | 'file' | 'json-file';
+export type FormatterType = 'pretty' | 'json' | 'logfmt';
+
+
+====================================================================================================
+📁 FILE: src\index.ts
+====================================================================================================
+
+// Main entry point for the Universal Logger library
+// Export all core functionality
+
+// Core classes and interfaces
+export {
+  Logger,
+  LoggerBuilder,
+  LogEntry,
+} from './core';
+
+// Interfaces
+export type {
+  ILogger,
+  IFormatter,
+  ITransport,
+  ILogEntry,
+} from './core';
+
+// Types and enums
+export type {
+  LogLevel,
+  LoggerConfig,
+  MaskingPattern,
+  BatchEntry,
+  ILogChange,
+  TransportType,
+  FormatterType,
+} from './core';
+
+// Formatters
+export {
+  PrettyFormatter,
+  JsonFormatter,
+  LogfmtFormatter,
+  FormatterFactory,
+} from './core';
+
+// Transports
+export {
+  TerminalTransport,
+  FileTransport,
+  JsonFileTransport,
+  TransportFactory,
+} from './core';
+
+// React integration
+export {
+  LoggerProvider,
+  LoggerContext,
+  useLogger,
+  useLoggerSimple,
+  useComponentLogger,
+  withLogger,
+} from './react';
+
+export type {
+  LoggerContextValue,
+  LoggerProviderProps,
+  UserActionContext,
+  ComponentLifecycleContext,
+  ApiRequestContext,
+  FormInteractionContext,
+  NavigationContext,
+  PerformanceContext,
+  ErrorContext,
+  FeatureUsageContext,
+  ReactLoggerOptions,
+  ReactLoggerConfig,
+  ReactLogEntry,
+  UseLoggerReturn,
+  WithLoggerInjectedProps,
+  WithLoggerOptions,
+} from './react';
+
+// Default export for convenience
+export { LoggerBuilder as default } from './core';
+
+
+====================================================================================================
+📁 FILE: src\react\LoggerContext.tsx
+====================================================================================================
+
+import React, { createContext, useContext, Context } from 'react';
+import { ILogger } from '../core';
+
+/**
+ * Logger Context for React applications
+ * Provides logger instance throughout the component tree
+ */
+export interface LoggerContextValue<TContext = any> {
+  logger: ILogger<TContext>;
+  appName?: string;
+}
+
+export const LoggerContext = createContext<LoggerContextValue | null>(null);
+
+/**
+ * Hook to access the logger context
+ * Throws an error if used outside of LoggerProvider
+ */
+export function useLoggerContext<TContext = any>(): LoggerContextValue<TContext> {
+  const context = useContext(LoggerContext as Context<LoggerContextValue<TContext> | null>);
+  
+  if (!context) {
+    throw new Error('useLoggerContext must be used within a LoggerProvider');
+  }
+  
+  return context;
+}
+
+/**
+ * LoggerProvider component props
+ */
+export interface LoggerProviderProps<TContext = any> {
+  children: React.ReactNode;
+  logger: ILogger<TContext>;
+  appName?: string;
+}
+
+/**
+ * LoggerProvider component
+ * Wraps the application with logger context
+ */
+export function LoggerProvider<TContext = any>({
+  children,
+  logger,
+  appName,
+}: LoggerProviderProps<TContext>) {
+  const contextValue: LoggerContextValue<TContext> = {
+    logger,
+    appName,
+  };
+
+  return (
+    <LoggerContext.Provider value={contextValue}>
+      {children}
+    </LoggerContext.Provider>
+  );
+}
+
+/**
+ * Display name for debugging
+ */
+LoggerProvider.displayName = 'LoggerProvider';
+
+
+====================================================================================================
+📁 FILE: src\react\index.ts
+====================================================================================================
+
+// React integration exports
+export * from './LoggerContext';
+export * from './useLogger';
+export * from './types';
+export * from './withLogger';
+
+
+====================================================================================================
+📁 FILE: src\react\types.ts
+====================================================================================================
+
+import { LogLevel, ILogChange } from '../core';
+
+/**
+ * Common React application log context types
+ */
+
+// User action logging context
+export interface UserActionContext {
+  userId?: string;
+  action: string;
+  component?: string;
+  timestamp?: Date;
+  metadata?: Record<string, any>;
+}
+
+// Component lifecycle context
+export interface ComponentLifecycleContext {
+  component: string;
+  lifecycle: 'mount' | 'unmount' | 'update' | 'error';
+  props?: Record<string, any>;
+  state?: Record<string, any>;
+}
+
+// API request context
+export interface ApiRequestContext {
+  url: string;
+  method: string;
+  statusCode?: number;
+  duration?: number;
+  requestId?: string;
+  userId?: string;
+  error?: string;
+}
+
+// Form interaction context
+export interface FormInteractionContext {
+  form: string;
+  field?: string;
+  action: 'submit' | 'change' | 'validate' | 'error';
+  values?: Record<string, any>;
+  errors?: Record<string, string>;
+}
+
+// Navigation context
+export interface NavigationContext {
+  from: string;
+  to: string;
+  trigger?: 'click' | 'redirect' | 'back' | 'forward';
+  userId?: string;
+}
+
+// Performance context
+export interface PerformanceContext {
+  metric: string;
+  value: number;
+  unit: 'ms' | 'bytes' | 'count' | 'percent';
+  component?: string;
+  threshold?: number;
+}
+
+// Error context
+export interface ErrorContext {
+  error: string;
+  stack?: string;
+  component?: string;
+  userId?: string;
+  userAgent?: string;
+  url?: string;
+}
+
+// Feature usage context
+export interface FeatureUsageContext {
+  feature: string;
+  action: string;
+  userId?: string;
+  properties?: Record<string, any>;
+}
+
+/**
+ * React Logger Hook Options
+ */
+export interface ReactLoggerOptions<TContext = any> {
+  /**
+   * Default context to include with all log entries
+   */
+  defaultContext?: TContext;
+  
+  /**
+   * Whether to automatically log component lifecycle events
+   */
+  logLifecycle?: boolean;
+  
+  /**
+   * Whether to automatically log errors
+   */
+  logErrors?: boolean;
+  
+  /**
+   * Custom log level filter
+   */
+  level?: LogLevel;
+  
+  /**
+   * Whether to include React component names in logs
+   */
+  includeComponentNames?: boolean;
+}
+
+/**
+ * React Logger Configuration
+ */
+export interface ReactLoggerConfig<TContext = any> extends ReactLoggerOptions<TContext> {
+  /**
+   * Application name for all logs
+   */
+  appName?: string;
+  
+  /**
+   * Whether to enable performance monitoring
+   */
+  enablePerformanceMonitoring?: boolean;
+  
+  /**
+   * Whether to enable user interaction tracking
+   */
+  enableUserTracking?: boolean;
+  
+  /**
+   * Custom context enrichers
+   */
+  contextEnrichers?: Array<(context: TContext) => TContext>;
+}
+
+/**
+ * Log entry with React-specific metadata
+ */
+export interface ReactLogEntry<TContext = any> {
+  id: string;
+  timestamp: Date;
+  level: LogLevel;
+  message: string;
+  context?: TContext;
+  error?: Error;
+  component?: string;
+  userId?: string;
+  sessionId?: string;
+  userAgent?: string;
+  url?: string;
+}
+
+/**
+ * React Logger Hook Return Type
+ */
+export interface UseLoggerReturn<TContext = any> {
+  /**
+   * The underlying logger instance
+   */
+  logger: any;
+  
+  /**
+   * Logging methods
+   */
+  log: {
+    info: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    debug: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    warn: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    error: (message: string, error?: Error, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    fatal: (message: string, error?: Error, context?: TContext) => Promise<ILogChange<TContext> | void>;
+  };
+  
+  /**
+   * Change tracking
+   */
+  logChange: <T>(message: string, before: T, after: T, context?: object) => Promise<ILogChange<T>>;
+  
+  /**
+   * Batch logging
+   */
+  batch: (entries: Array<{
+    level: LogLevel;
+    message: string;
+    context?: TContext;
+    error?: Error;
+  }>) => Promise<void>;
+}
+
+
+====================================================================================================
+📁 FILE: src\react\useLogger.ts
+====================================================================================================
+
+import { useCallback } from 'react';
+import { ILogger, LogLevel, ILogChange } from '../core';
+import { useLoggerContext } from './LoggerContext';
+
+/**
+ * Enhanced logger hook for React components
+ * Provides typed logging methods with automatic context
+ */
+export function useLogger<TContext = any>(): {
+  logger: ILogger<TContext>;
+  log: {
+    info: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    debug: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    warn: (message: string, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    error: (message: string, error?: Error, context?: TContext) => Promise<ILogChange<TContext> | void>;
+    fatal: (message: string, error?: Error, context?: TContext) => Promise<ILogChange<TContext> | void>;
+  };
+  logChange: <T>(message: string, before: T, after: T, context?: object) => Promise<ILogChange<T>>;
+  batch: (entries: Array<{
+    level: LogLevel;
+    message: string;
+    context?: TContext;
+    error?: Error;
+  }>) => Promise<void>;
+} {
+  const { logger } = useLoggerContext<TContext>();
+
+  // Memoized logging functions to maintain reference stability
+  const log = {
+    info: useCallback(
+      (message: string, context?: TContext) => logger.info(message, context),
+      [logger]
+    ),
+    debug: useCallback(
+      (message: string, context?: TContext) => logger.debug(message, context),
+      [logger]
+    ),
+    warn: useCallback(
+      (message: string, context?: TContext) => logger.warn(message, context),
+      [logger]
+    ),
+    error: useCallback(
+      (message: string, error?: Error, context?: TContext) => logger.error(message, error, context),
+      [logger]
+    ),
+    fatal: useCallback(
+      (message: string, error?: Error, context?: TContext) => logger.fatal(message, error, context),
+      [logger]
+    ),
+  };
+
+  const logChange = useCallback(
+    <T>(message: string, before: T, after: T, context?: object) => 
+      logger.logChange(message, before, after, context),
+    [logger]
+  );
+
+  const batch = useCallback(
+    (entries: Array<{
+      level: LogLevel;
+      message: string;
+      context?: TContext;
+      error?: Error;
+    }>) => logger.batch(entries),
+    [logger]
+  );
+
+  return {
+    logger,
+    log,
+    logChange,
+    batch,
+  };
+}
+
+/**
+ * Simplified logger hook for basic usage
+ * Returns only the logging functions
+ */
+export function useLoggerSimple<TContext = any>() {
+  const { log, logChange, batch } = useLogger<TContext>();
+  
+  return {
+    info: log.info,
+    debug: log.debug,
+    warn: log.warn,
+    error: log.error,
+    fatal: log.fatal,
+    logChange,
+    batch,
+  };
+}
+
+/**
+ * Hook for creating a logger with component-specific context
+ * Automatically adds component name and other metadata
+ */
+export function useComponentLogger<TContext = any>(
+  componentName: string,
+  additionalContext?: Omit<TContext, 'component'>
+) {
+  const { log, logChange, batch } = useLogger<TContext & { component: string }>();
+  
+  const createLogEntry = useCallback((baseContext?: TContext) => ({
+    component: componentName,
+    ...additionalContext,
+    ...baseContext,
+  }) as TContext & { component: string }, [componentName, additionalContext]);
+
+  return {
+    info: useCallback(
+      (message: string, context?: TContext) => 
+        log.info(message, createLogEntry(context)),
+      [log, createLogEntry]
+    ),
+    debug: useCallback(
+      (message: string, context?: TContext) => 
+        log.debug(message, createLogEntry(context)),
+      [log, createLogEntry]
+    ),
+    warn: useCallback(
+      (message: string, context?: TContext) => 
+        log.warn(message, createLogEntry(context)),
+      [log, createLogEntry]
+    ),
+    error: useCallback(
+      (message: string, error?: Error, context?: TContext) => 
+        log.error(message, error, createLogEntry(context)),
+      [log, createLogEntry]
+    ),
+    fatal: useCallback(
+      (message: string, error?: Error, context?: TContext) => 
+        log.fatal(message, error, createLogEntry(context)),
+      [log, createLogEntry]
+    ),
+    logChange,
+    batch,
+  };
+}
+
+
+====================================================================================================
+📁 FILE: src\react\withLogger.tsx
+====================================================================================================
+
+import React, { useEffect, useRef } from 'react';
+import { ILogger, LogLevel } from '../core';
+import { ReactLoggerConfig, ComponentLifecycleContext } from './types';
+
+/**
+ * Props that are injected by withLogger HOC
+ */
+export interface WithLoggerInjectedProps {
+  logger: ILogger;
+}
+
+/**
+ * Configuration for withLogger HOC
+ */
+export interface WithLoggerOptions<TContext = any> extends ReactLoggerConfig<TContext> {
+  /**
+   * Whether to log component mount/unmount
+   */
+  logLifecycle?: boolean;
+  
+  /**
+   * Whether to log render errors
+   */
+  logErrors?: boolean;
+  
+  /**
+   * Whether to log prop changes
+   */
+  logPropChanges?: boolean;
+  
+  /**
+   * Custom context for this component
+   */
+  context?: TContext;
+}
+
+/**
+ * Higher-order component that adds logging capabilities to any component
+ * Automatically logs lifecycle events, errors, and prop changes
+ */
+export function withLogger<TProps extends object, TContext = any>(
+  WrappedComponent: React.ComponentType<TProps & WithLoggerInjectedProps>,
+  options: WithLoggerOptions<TContext> = {}
+) {
+  const {
+    logLifecycle = true,
+    logErrors = true,
+    logPropChanges = false,
+    context,
+    appName,
+    defaultContext,
+  } = options;
+
+  const WithLoggerComponent = React.forwardRef<any, TProps & WithLoggerInjectedProps>((props, ref) => {
+    const { logger } = props;
+    const prevPropsRef = useRef<TProps & WithLoggerInjectedProps>({} as TProps & WithLoggerInjectedProps);
+    const mountTimeRef = useRef<Date>(new Date());
+
+    // Log component mount
+    useEffect(() => {
+      if (logLifecycle && logger) {
+        mountTimeRef.current = new Date();
+        
+        const lifecycleContext: ComponentLifecycleContext = {
+          component: WrappedComponent.displayName || WrappedComponent.name || 'Unknown',
+          lifecycle: 'mount',
+          props: omitLoggerProps(props as any),
+          ...context,
+        };
+
+        logger.info(`Component mounted: ${WrappedComponent.displayName || WrappedComponent.name}`, lifecycleContext as any);
+      }
+
+      return () => {
+        // Cleanup on unmount
+        if (logLifecycle && logger && mountTimeRef.current) {
+          const mountDuration = Date.now() - mountTimeRef.current.getTime();
+          
+          const lifecycleContext: ComponentLifecycleContext = {
+            component: WrappedComponent.displayName || WrappedComponent.name || 'Unknown',
+            lifecycle: 'unmount',
+            props: omitLoggerProps(props as any),
+            ...context,
+          };
+
+          logger.info(`Component unmounted: ${WrappedComponent.displayName || WrappedComponent.name} (mounted for ${mountDuration}ms)`, lifecycleContext as any);
+        }
+      };
+    }, []);
+
+    // Log prop changes
+    useEffect(() => {
+      if (logPropChanges && logger && prevPropsRef.current) {
+        const changes = findPropChanges(prevPropsRef.current as any, props as any);
+        
+        if (changes.length > 0) {
+          const componentName = WrappedComponent.displayName || WrappedComponent.name || 'Unknown';
+          
+          logger.debug(`Props changed in ${componentName}`, {
+            component: componentName,
+            changes,
+            ...context,
+          } as any);
+        }
+      }
+      
+      prevPropsRef.current = props as any;
+    });
+
+    // Log render errors
+    useEffect(() => {
+      const originalConsoleError = console.error;
+      
+      console.error = (...args: any[]) => {
+        if (logErrors && logger) {
+          const componentName = WrappedComponent.displayName || WrappedComponent.name || 'Unknown';
+          
+          logger.error(`Render error in ${componentName}`, new Error(args.join(' ')), {
+            component: componentName,
+            args,
+            ...context,
+          } as any);
+        }
+        
+        originalConsoleError.apply(console, args);
+      };
+
+      return () => {
+        console.error = originalConsoleError;
+      };
+    }, []);
+
+    // Error boundary for catching render errors
+    const [hasError, setHasError] = React.useState(false);
+    const [error, setError] = React.useState<Error | null>(null);
+
+    React.useEffect(() => {
+      if (hasError && error && logErrors && logger) {
+        const componentName = WrappedComponent.displayName || WrappedComponent.name || 'Unknown';
+        
+        logger.fatal(`Component error in ${componentName}`, error, {
+          component: componentName,
+          stack: error.stack,
+          ...context,
+        } as any);
+      }
+    }, [hasError, error]);
+
+    if (hasError) {
+      // Fallback UI when component crashes
+      return (
+        <div style={{ padding: '16px', border: '1px solid #ff6b6b', borderRadius: '4px', backgroundColor: '#ffe0e0' }}>
+          <h3>Something went wrong</h3>
+          <p>Component {WrappedComponent.displayName || WrappedComponent.name || 'Unknown'} encountered an error.</p>
+          {process.env.NODE_ENV === 'development' && error && (
+            <details>
+              <summary>Error details</summary>
+              <pre style={{ fontSize: '12px', overflow: 'auto' }}>
+                {error.stack}
+              </pre>
+            </details>
+          )}
+        </div>
+      );
+    }
+
+    try {
+      return <WrappedComponent {...(props as any)} ref={ref} />;
+    } catch (err) {
+      setHasError(true);
+      setError(err instanceof Error ? err : new Error(String(err)));
+      return null;
+    }
+  });
+
+  // Set display name for debugging
+  WithLoggerComponent.displayName = `withLogger(${WrappedComponent.displayName || WrappedComponent.name || 'Component'})`;
+
+  return WithLoggerComponent;
+}
+
+/**
+ * Helper function to remove logger props from props object
+ */
+function omitLoggerProps<T extends WithLoggerInjectedProps>(props: T): Omit<T, keyof WithLoggerInjectedProps> {
+  const { logger, ...rest } = props;
+  return rest;
+}
+
+/**
+ * Helper function to find changed props
+ */
+function findPropChanges<T extends WithLoggerInjectedProps>(prevProps: T, nextProps: T): Array<{
+  prop: string;
+  oldValue: any;
+  newValue: any;
+}> {
+  const changes: Array<{ prop: string; oldValue: any; newValue: any }> = [];
+  
+  const keys = new Set([...Object.keys(prevProps), ...Object.keys(nextProps)]);
+  
+  for (const key of keys) {
+    if (key === 'logger') continue; // Skip logger prop
+    
+    const oldValue = (prevProps as any)[key];
+    const newValue = (nextProps as any)[key];
+    
+    if (oldValue !== newValue) {
+      changes.push({
+        prop: key,
+        oldValue,
+        newValue,
+      });
+    }
+  }
+  
+  return changes;
+}
+
+
